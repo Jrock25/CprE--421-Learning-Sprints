@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Timing Side-Channel Visualizer</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #171a23;
+    --border: #2a2e3a;
+    --text: #e6e8ee;
+    --muted: #8b90a0;
+    --safe: #2f8f5b;
+    --warn: #d9a441;
+    --danger: #d9534f;
+    --accent: #4f8cff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 1.5rem; margin-bottom: 4px; }
+  p.subtitle { color: var(--muted); margin-top: 0; margin-bottom: 24px; font-size: 0.95rem; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+  input[type="text"] {
+    width: 100%;
+    padding: 10px 12px;
+    background: #0d0f16;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 1rem;
+    letter-spacing: 2px;
+  }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+  button {
+    padding: 10px 16px;
+    background: #232838;
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  button:hover { background: #2b3146; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #0b0e16; font-weight: 600; }
+  button.primary:hover { filter: brightness(1.1); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .stat-line { display: flex; gap: 24px; font-size: 0.85rem; color: var(--muted); margin-top: 12px; flex-wrap: wrap; }
+  .stat-line strong { color: var(--text); }
+  .bars {
+    margin-top: 18px;
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    height: 140px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 2px;
+  }
+  .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+  .bar {
+    width: 100%;
+    max-width: 28px;
+    background: var(--accent);
+    border-radius: 3px 3px 0 0;
+    transition: height 0.3s ease, background 0.3s ease;
+  }
+  .bar.leaked { background: var(--warn); }
+  .bar-label {
+    font-size: 0.68rem;
+    color: var(--muted);
+    margin-top: 4px;
+    font-family: "SF Mono", Menlo, monospace;
+    text-align: center;
+  }
+  .status {
+    margin-top: 18px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    border: 1px solid var(--border);
+  }
+  .status.ok { background: rgba(47,143,91,0.12); border-color: var(--safe); }
+  .status.warn { background: rgba(217,164,65,0.12); border-color: var(--warn); }
+  .status.danger { background: rgba(217,83,79,0.15); border-color: var(--danger); }
+  .explain { margin-top: 24px; }
+  .explain h2 { font-size: 1.05rem; margin-bottom: 8px; }
+  .explain p { color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
+  code { background: #0d0f16; padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
+  .note {
+    margin-top: 10px;
+    font-size: 0.78rem;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+  }
+  .mode-toggle { display: flex; gap: 8px; margin-top: 14px; }
+  .mode-toggle button.active { background: var(--accent); color: #0b0e16; border-color: var(--accent); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>Timing Side-Channel Visualizer</h1>
+<p class="subtitle">Educational demo: see how an early-exit string comparison leaks information one character at a time through response timing, and what a constant-time comparison looks like instead.</p>
+
+<div class="panel">
+  <label for="secretInput">Secret value being compared against (simulated; stays local in your browser)</label>
+  <input type="text" id="secretInput" value="H4CK3R" maxlength="12" autocomplete="off" spellcheck="false">
+
+  <div class="mode-toggle">
+    <button id="modeVuln" class="active">Vulnerable: early-exit comparison</button>
+    <button id="modeSafe">Fixed: constant-time comparison</button>
+  </div>
+
+  <div class="row">
+    <div style="flex:1; min-width:220px;">
+      <label for="guessInput">Your guess (try getting characters right one at a time)</label>
+      <input type="text" id="guessInput" placeholder="Type a guess..." autocomplete="off" spellcheck="false">
+    </div>
+    <button id="attackBtn">Auto-attack: recover the secret</button>
+    <button id="resetBtn">Reset</button>
+  </div>
+
+  <div class="stat-line">
+    <span>Simulated comparison time: <strong id="timeLabel">0</strong> units</span>
+    <span>Characters confirmed correct: <strong id="correctLabel">0</strong></span>
+    <span>Match: <strong id="matchLabel">no</strong></span>
+  </div>
+
+  <div class="bars" id="barsContainer"></div>
+
+  <div class="status ok" id="statusBox">
+    Type a guess above. In vulnerable mode, the bar height for each position shows how long the comparison "spent" before bailing out, one unit of simulated work per character checked.
+  </div>
+</div>
+
+<div class="panel explain">
+  <h2>What's happening</h2>
+  <p>
+    The vulnerable mode simulates code like <code>for (i = 0; i &lt; len; i++) { if (guess[i] != secret[i]) return false; }</code>, which
+    stops comparing the moment it finds a mismatch. That means a guess that gets the first 3 characters right takes measurably
+    longer to reject than one that gets 0 characters right &mdash; the comparison "walked further" before bailing out. An attacker
+    who can measure response time doesn't need to guess the whole secret at once: they can brute-force it one position at a time,
+    keeping whichever next character makes the timing go up, then moving to the next position. This turns an exponential guessing
+    problem into a linear one.
+  </p>
+  <p>
+    The fixed mode simulates a constant-time comparison (e.g. XOR-and-accumulate across the full length regardless of mismatches,
+    like <code>MessageDigest.isEqual</code> or <code>hmac.compare_digest</code>), which always does the same amount of work no
+    matter how many characters are correct &mdash; so the timing bars stay flat and leak nothing.
+  </p>
+  <div class="note">Built for SE/CprE 4210 Learning Sprint #3, Problem 5. No real secrets, network requests, or timing measurements are involved &mdash; everything here is a simulated, local-only animation of the concept.</div>
+</div>
+
+<script>
+(function () {
+  const secretInput = document.getElementById('secretInput');
+  const guessInput = document.getElementById('guessInput');
+  const barsContainer = document.getElementById('barsContainer');
+  const timeLabel = document.getElementById('timeLabel');
+  const correctLabel = document.getElementById('correctLabel');
+  const matchLabel = document.getElementById('matchLabel');
+  const statusBox = document.getElementById('statusBox');
+  const attackBtn = document.getElementById('attackBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const modeVulnBtn = document.getElementById('modeVuln');
+  const modeSafeBtn = document.getElementById('modeSafe');
+
+  let vulnerable = true;
+  let attacking = false;
+
+  function compareVulnerable(secret, guess) {
+    let i = 0;
+    for (; i < secret.length; i++) {
+      if (guess[i] === undefined || guess[i] !== secret[i]) break;
+    }
+    return { workDone: i + (i < secret.length ? 1 : 0), correctPrefix: i, isMatch: i === secret.length && guess.length === secret.length };
+  }
+
+  function compareConstantTime(secret, guess) {
+    let correctPrefix = 0;
+    let stillCorrect = true;
+    let diff = 0;
+    for (let i = 0; i < secret.length; i++) {
+      const g = guess[i] || '\0';
+      if (g !== secret[i]) { diff |= 1; stillCorrect = false; }
+      if (stillCorrect) correctPrefix++;
+    }
+    if (guess.length !== secret.length) diff |= 1;
+    return { workDone: secret.length, correctPrefix, isMatch: diff === 0 };
+  }
+
+  function render() {
+    const secret = secretInput.value || '';
+    const guess = guessInput.value || '';
+    const result = vulnerable ? compareVulnerable(secret, guess) : compareConstantTime(secret, guess);
+
+    timeLabel.textContent = result.workDone;
+    correctLabel.textContent = result.correctPrefix;
+    matchLabel.textContent = result.isMatch ? 'YES' : 'no';
+
+    barsContainer.innerHTML = '';
+    const maxWork = secret.length + 1;
+    for (let i = 0; i < secret.length; i++) {
+      const col = document.createElement('div');
+      col.className = 'bar-col';
+      const bar = document.createElement('div');
+      bar.className = 'bar';
+      const filled = i < result.workDone;
+      const heightPct = filled ? Math.max(8, ((i + 1) / maxWork) * 100) : 6;
+      bar.style.height = heightPct + '%';
+      if (vulnerable && i < result.correctPrefix) bar.classList.add('leaked');
+      col.appendChild(bar);
+      const lbl = document.createElement('div');
+      lbl.className = 'bar-label';
+      lbl.textContent = i;
+      col.appendChild(lbl);
+      barsContainer.appendChild(col);
+    }
+
+    statusBox.classList.remove('ok', 'warn', 'danger');
+    if (result.isMatch) {
+      statusBox.classList.add('ok');
+      statusBox.textContent = 'Match! The guess equals the secret.';
+    } else if (vulnerable) {
+      if (result.correctPrefix > 0) {
+        statusBox.classList.add('warn');
+        statusBox.textContent = `Rejected, but the comparison ran ${result.workDone} step(s) before bailing out -- the first ${result.correctPrefix} character(s) were correct. That extra time is the leak.`;
+      } else {
+        statusBox.classList.add('danger');
+        statusBox.textContent = 'Rejected immediately (1 step) -- the very first character was wrong.';
+      }
+    } else {
+      statusBox.classList.add('ok');
+      statusBox.textContent = `Rejected, but the comparison always does ${result.workDone} steps regardless of how many characters matched (${result.correctPrefix} here) -- no timing signal to exploit.`;
+    }
+  }
+
+  function setMode(toVulnerable) {
+    vulnerable = toVulnerable;
+    modeVulnBtn.classList.toggle('active', vulnerable);
+    modeSafeBtn.classList.toggle('active', !vulnerable);
+    render();
+  }
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  async function autoAttack() {
+    if (attacking) return;
+    attacking = true;
+    attackBtn.disabled = true;
+    const secret = secretInput.value || '';
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let known = '';
+    for (let pos = 0; pos < secret.length; pos++) {
+      let foundChar = null;
+      for (const ch of alphabet) {
+        const trial = known + ch;
+        guessInput.value = trial;
+        render();
+        await sleep(55);
+        const result = vulnerable ? compareVulnerable(secret, trial) : compareConstantTime(secret, trial);
+        if (result.correctPrefix > known.length) {
+          foundChar = ch;
+          break;
+        }
+      }
+      if (foundChar === null) { attacking = false; attackBtn.disabled = false; return; }
+      known += foundChar;
+    }
+    guessInput.value = known;
+    render();
+    attacking = false;
+    attackBtn.disabled = false;
+  }
+
+  secretInput.addEventListener('input', render);
+  guessInput.addEventListener('input', render);
+  modeVulnBtn.addEventListener('click', () => setMode(true));
+  modeSafeBtn.addEventListener('click', () => setMode(false));
+  attackBtn.addEventListener('click', autoAttack);
+  resetBtn.addEventListener('click', () => { guessInput.value = ''; render(); });
+
+  render();
+})();
+</script>
+
+</body>
+</html>
